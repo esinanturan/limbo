@@ -103,6 +103,8 @@ impl std::fmt::Display for OutputMode {
 
 #[derive(Debug, Clone)]
 pub enum Command {
+    /// Exit this program with return-code CODE
+    Exit,
     /// Quit the shell
     Quit,
     /// Open a database file
@@ -136,7 +138,8 @@ pub enum Command {
 impl Command {
     fn min_args(&self) -> usize {
         1 + match self {
-            Self::Quit
+            Self::Exit
+            | Self::Quit
             | Self::Schema
             | Self::Help
             | Self::Opcodes
@@ -155,6 +158,7 @@ impl Command {
 
     fn usage(&self) -> &str {
         match self {
+            Self::Exit => ".exit ?<CODE>",
             Self::Quit => ".quit",
             Self::Open => ".open <file>",
             Self::Help => ".help",
@@ -177,6 +181,7 @@ impl FromStr for Command {
     type Err = String;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
+            ".exit" => Ok(Self::Exit),
             ".quit" => Ok(Self::Quit),
             ".open" => Ok(Self::Open),
             ".help" => Ok(Self::Help),
@@ -305,13 +310,7 @@ impl Limbo {
         if cmd.trim().starts_with('.') {
             self.handle_dot_command(cmd);
         } else {
-            let conn = self.conn.clone();
-            let runner = conn.query_runner(cmd.as_bytes());
-            for output in runner {
-                if let Err(e) = self.print_query_result(cmd, output) {
-                    let _ = self.writeln(e.to_string());
-                }
-            }
+            self.run_query(cmd);
         }
         std::process::exit(0);
     }
@@ -429,6 +428,21 @@ impl Limbo {
         self.input_buff.push(' ');
     }
 
+    fn run_query(&mut self, input: &str) {
+        let echo = self.opts.echo;
+        if echo {
+            let _ = self.writeln(&input);
+        }
+        let conn = self.conn.clone();
+        let runner = conn.query_runner(input.as_bytes());
+        for output in runner {
+            if let Err(_) = self.print_query_result(&input, output) {
+                break;
+            }
+        }
+        self.reset_input();
+    }
+
     pub fn handle_input_line(
         &mut self,
         line: &str,
@@ -453,17 +467,7 @@ impl Limbo {
                     self.buffer_input(after_comment);
 
                     if after_comment.ends_with(';') {
-                        if self.opts.echo {
-                            let _ = self.writeln(after_comment);
-                        }
-                        let conn = self.conn.clone();
-                        let runner = conn.query_runner(after_comment.as_bytes());
-                        for output in runner {
-                            if let Err(e) = self.print_query_result(after_comment, output) {
-                                let _ = self.writeln(e.to_string());
-                            }
-                        }
-                        self.reset_input();
+                        self.run_query(after_comment);
                     } else {
                         self.set_multiline_prompt();
                     }
@@ -484,20 +488,9 @@ impl Limbo {
         if line.ends_with(';') {
             self.buffer_input(line);
             let buff = self.input_buff.clone();
-            let echo = self.opts.echo;
-            if echo {
-                let _ = self.writeln(&buff);
-            }
-            let conn = self.conn.clone();
-            let runner = conn.query_runner(buff.as_bytes());
-            for output in runner {
-                if let Err(e) = self.print_query_result(&buff, output) {
-                    let _ = self.writeln(e.to_string());
-                }
-            }
-            self.reset_input();
+            self.run_query(buff.as_str());
         } else {
-            self.buffer_input(line);
+            self.buffer_input(format!("{}\n", line).as_str());
             self.set_multiline_prompt();
         }
         rl.add_history_entry(line.to_owned())?;
@@ -519,6 +512,10 @@ impl Limbo {
                 return;
             }
             match cmd {
+                Command::Exit => {
+                    let code = args.get(1).and_then(|c| c.parse::<i32>().ok()).unwrap_or(0);
+                    std::process::exit(code);
+                }
                 Command::Quit => {
                     let _ = self.writeln("Exiting Limbo SQL Shell.");
                     let _ = self.close_conn();
@@ -677,7 +674,7 @@ impl Limbo {
                     if rows.num_columns() > 0 {
                         let header = (0..rows.num_columns())
                             .map(|i| {
-                                let name = rows.get_column_name(i).cloned().unwrap_or_default();
+                                let name = rows.get_column_name(i);
                                 Cell::new(name).add_attribute(Attribute::Bold)
                             })
                             .collect::<Vec<_>>();
@@ -736,6 +733,7 @@ impl Limbo {
                     "{:?}",
                     miette::Error::from(err).with_source_code(sql.to_owned())
                 ));
+                anyhow::bail!("We have to throw here, even if we printed error");
             }
         }
         // for now let's cache flush always
@@ -865,6 +863,16 @@ impl Limbo {
 
         Ok(())
     }
+
+    pub fn handle_remaining_input(&mut self) {
+        if self.input_buff.is_empty() {
+            return;
+        }
+
+        let buff = self.input_buff.clone();
+        self.run_query(buff.as_str());
+        self.reset_input();
+    }
 }
 
 fn get_writer(output: &str) -> Box<dyn Write> {
@@ -913,6 +921,7 @@ In addition to standard SQL commands, the following special commands are availab
 
 Special Commands:
 -----------------
+.exit ?<CODE>              Exit this program with return-code CODE
 .quit                      Stop interpreting input stream and exit.
 .show                      Display current settings.
 .open <database_file>      Open and connect to a database file.

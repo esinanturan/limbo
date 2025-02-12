@@ -1,6 +1,5 @@
 use super::{common, Completion, File, OpenFlags, IO};
 use crate::{LimboError, Result};
-use log::{debug, trace};
 use rustix::fs::{self, FlockOperation, OFlags};
 use rustix::io_uring::iovec;
 use std::cell::RefCell;
@@ -10,6 +9,7 @@ use std::os::fd::AsFd;
 use std::os::unix::io::AsRawFd;
 use std::rc::Rc;
 use thiserror::Error;
+use tracing::{debug, trace};
 
 const MAX_IOVECS: u32 = 128;
 const SQPOLL_IDLE: u32 = 1000;
@@ -242,10 +242,7 @@ impl File for UringFile {
     }
 
     fn pread(&self, pos: usize, c: Completion) -> Result<()> {
-        let r = match c {
-            Completion::Read(ref r) => r,
-            _ => unreachable!(),
-        };
+        let r = c.as_read();
         trace!("pread(pos = {}, length = {})", pos, r.buf().len());
         let fd = io_uring::types::Fd(self.file.as_raw_fd());
         let mut io = self.io.borrow_mut();
