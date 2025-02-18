@@ -476,7 +476,7 @@ checksum = "773648b94d0e5d620f64f280777445740e61fe701025087ec8b57f45c791888b"
 
 [[package]]
 name = "core_tester"
-version = "0.0.14"
+version = "0.0.15"
 dependencies = [
  "anyhow",
  "assert_cmd",
@@ -1452,9 +1452,9 @@ dependencies = [
 
 [[package]]
 name = "julian_day_converter"
-version = "0.3.4"
+version = "0.4.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2e5c45e06fa273ed7800f954d1cb6054b9b07115b370da56185f506700c0e3aa"
+checksum = "1aa5652b85ab018289638c6b924db618da9edd2ddfff7fa0ec38a8b51a9192d3"
 dependencies = [
  "chrono",
 ]
@@ -1559,7 +1559,45 @@ dependencies = [
 
 [[package]]
 name = "limbo"
-version = "0.0.14"
+version = "0.0.15"
+dependencies = [
+ "limbo_core",
+ "thiserror 2.0.11",
+ "tokio",
+]
+
+[[package]]
+name = "limbo-go"
+version = "0.0.15"
+dependencies = [
+ "limbo_core",
+]
+
+[[package]]
+name = "limbo-java"
+version = "0.0.15"
+dependencies = [
+ "jni",
+ "limbo_core",
+ "thiserror 2.0.11",
+]
+
+[[package]]
+name = "limbo-wasm"
+version = "0.0.15"
+dependencies = [
+ "console_error_panic_hook",
+ "getrandom 0.2.15",
+ "js-sys",
+ "limbo_core",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "web-sys",
+]
+
+[[package]]
+name = "limbo_cli"
+version = "0.0.15"
 dependencies = [
  "anyhow",
  "clap",
@@ -1574,36 +1612,8 @@ dependencies = [
 ]
 
 [[package]]
-name = "limbo-go"
-version = "0.0.14"
-dependencies = [
- "limbo_core",
-]
-
-[[package]]
-name = "limbo-java"
-version = "0.0.14"
-dependencies = [
- "jni",
- "limbo_core",
- "thiserror 2.0.11",
-]
-
-[[package]]
-name = "limbo-wasm"
-version = "0.0.14"
-dependencies = [
- "console_error_panic_hook",
- "js-sys",
- "limbo_core",
- "wasm-bindgen",
- "wasm-bindgen-futures",
- "web-sys",
-]
-
-[[package]]
 name = "limbo_core"
-version = "0.0.14"
+version = "0.0.15"
 dependencies = [
  "built",
  "cfg_block",
@@ -1626,9 +1636,9 @@ dependencies = [
  "limbo_percentile",
  "limbo_regexp",
  "limbo_series",
+ "limbo_sqlite3_parser",
  "limbo_time",
  "limbo_uuid",
- "log",
  "miette",
  "mimalloc",
  "parking_lot",
@@ -1647,7 +1657,6 @@ dependencies = [
  "rustix",
  "ryu",
  "serde",
- "sqlite3-parser",
  "strum",
  "tempfile",
  "thiserror 1.0.69",
@@ -1656,7 +1665,7 @@ dependencies = [
 
 [[package]]
 name = "limbo_crypto"
-version = "0.0.14"
+version = "0.0.15"
 dependencies = [
  "blake3",
  "data-encoding",
@@ -1669,23 +1678,14 @@ dependencies = [
 
 [[package]]
 name = "limbo_ext"
-version = "0.0.14"
+version = "0.0.15"
 dependencies = [
  "limbo_macros",
 ]
 
 [[package]]
-name = "limbo_libsql"
-version = "0.0.14"
-dependencies = [
- "limbo_core",
- "thiserror 2.0.11",
- "tokio",
-]
-
-[[package]]
 name = "limbo_macros"
-version = "0.0.14"
+version = "0.0.15"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1694,7 +1694,7 @@ dependencies = [
 
 [[package]]
 name = "limbo_percentile"
-version = "0.0.14"
+version = "0.0.15"
 dependencies = [
  "limbo_ext",
  "mimalloc",
@@ -1702,7 +1702,7 @@ dependencies = [
 
 [[package]]
 name = "limbo_regexp"
-version = "0.0.14"
+version = "0.0.15"
 dependencies = [
  "limbo_ext",
  "mimalloc",
@@ -1711,7 +1711,7 @@ dependencies = [
 
 [[package]]
 name = "limbo_series"
-version = "0.0.14"
+version = "0.0.15"
 dependencies = [
  "limbo_ext",
  "mimalloc",
@@ -1721,7 +1721,7 @@ dependencies = [
 
 [[package]]
 name = "limbo_sim"
-version = "0.0.14"
+version = "0.0.15"
 dependencies = [
  "anarchist-readable-name-generator-lib",
  "clap",
@@ -1733,6 +1733,7 @@ dependencies = [
  "rand_chacha 0.3.1",
  "regex",
  "regex-syntax",
+ "rusqlite",
  "serde",
  "serde_json",
  "tempfile",
@@ -1740,7 +1741,7 @@ dependencies = [
 
 [[package]]
 name = "limbo_sqlite3"
-version = "0.0.14"
+version = "0.0.15"
 dependencies = [
  "env_logger 0.11.6",
  "libc",
@@ -1749,8 +1750,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "limbo_sqlite3_parser"
+version = "0.0.15"
+dependencies = [
+ "bitflags 2.8.0",
+ "cc",
+ "env_logger 0.11.6",
+ "fallible-iterator 0.3.0",
+ "indexmap",
+ "log",
+ "memchr",
+ "miette",
+ "phf",
+ "phf_codegen",
+ "phf_shared",
+ "strum",
+ "strum_macros",
+ "uncased",
+]
+
+[[package]]
 name = "limbo_time"
-version = "0.0.14"
+version = "0.0.15"
 dependencies = [
  "chrono",
  "limbo_ext",
@@ -1762,7 +1783,7 @@ dependencies = [
 
 [[package]]
 name = "limbo_uuid"
-version = "0.0.14"
+version = "0.0.15"
 dependencies = [
  "limbo_ext",
  "mimalloc",
@@ -2283,7 +2304,7 @@ dependencies = [
 
 [[package]]
 name = "py-limbo"
-version = "0.0.14"
+version = "0.0.15"
 dependencies = [
  "anyhow",
  "limbo_core",
@@ -2803,26 +2824,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6980e8d7511241f8acf4aebddbb1ff938df5eebe98691418c4468d0b72a96a67"
 
 [[package]]
-name = "sqlite3-parser"
-version = "0.13.0"
-dependencies = [
- "bitflags 2.8.0",
- "cc",
- "env_logger 0.11.6",
- "fallible-iterator 0.3.0",
- "indexmap",
- "log",
- "memchr",
- "miette",
- "phf",
- "phf_codegen",
- "phf_shared",
- "strum",
- "strum_macros",
- "uncased",
-]
-
-[[package]]
 name = "stable_deref_trait"
 version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3096,19 +3097,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "784e0ac535deb450455cbfa28a6f0df145ea1bb7ae51b821cf5e7927fdcfbdd0"
 dependencies = [
  "pin-project-lite",
- "tracing-attributes",
  "tracing-core",
-]
-
-[[package]]
-name = "tracing-attributes"
-version = "0.1.28"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "395ae124c09f9e6918a2310af6038fba074bcf474ac352496d5910dd59a2226d"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 2.0.96",
 ]
 
 [[package]]
@@ -3116,9 +3105,6 @@ name = "tracing-core"
 version = "0.1.33"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e672c95779cf947c5311f83787af4fa8fffd12fb27e4993211a84bdfd9610f9c"
-dependencies = [
- "once_cell",
-]
 
 [[package]]
 name = "typenum"

@@ -33,6 +33,7 @@ use crate::functions::printf::exec_printf;
 use crate::info;
 use crate::pseudo::PseudoCursor;
 use crate::result::LimboResult;
+use crate::schema::{affinity, Affinity};
 use crate::storage::sqlite3_ondisk::DatabaseHeader;
 use crate::storage::wal::CheckpointResult;
 use crate::storage::{btree::BTreeCursor, pager::Pager};
@@ -411,7 +412,6 @@ pub struct Program {
     pub comments: Option<HashMap<InsnReference, &'static str>>,
     pub parameters: crate::parameters::Parameters,
     pub connection: Weak<Connection>,
-    pub auto_commit: bool,
     pub n_change: Cell<i64>,
     pub change_cnt_on: bool,
     pub result_columns: Vec<ResultSetColumn>,
@@ -1131,37 +1131,7 @@ impl Program {
                             )));
                         }
                     }
-                    log::trace!("Halt auto_commit {}", self.auto_commit);
-                    let connection = self
-                        .connection
-                        .upgrade()
-                        .expect("only weak ref to connection?");
-                    let current_state = connection.transaction_state.borrow().clone();
-                    if current_state == TransactionState::Read {
-                        pager.end_read_tx()?;
-                        return Ok(StepResult::Done);
-                    }
-                    return if self.auto_commit {
-                        match pager.end_tx() {
-                            Ok(crate::storage::wal::CheckpointStatus::IO) => Ok(StepResult::IO),
-                            Ok(crate::storage::wal::CheckpointStatus::Done(_)) => {
-                                if self.change_cnt_on {
-                                    if let Some(conn) = self.connection.upgrade() {
-                                        conn.set_changes(self.n_change.get());
-                                    }
-                                }
-                                Ok(StepResult::Done)
-                            }
-                            Err(e) => Err(e),
-                        }
-                    } else {
-                        if self.change_cnt_on {
-                            if let Some(conn) = self.connection.upgrade() {
-                                conn.set_changes(self.n_change.get());
-                            }
-                        }
-                        return Ok(StepResult::Done);
-                    };
+                    return self.halt(pager);
                 }
                 Insn::Transaction { write } => {
                     let connection = self.connection.upgrade().unwrap();
@@ -1177,14 +1147,14 @@ impl Program {
 
                     if updated && matches!(current_state, TransactionState::None) {
                         if let LimboResult::Busy = pager.begin_read_tx()? {
-                            log::trace!("begin_read_tx busy");
+                            tracing::trace!("begin_read_tx busy");
                             return Ok(StepResult::Busy);
                         }
                     }
 
                     if updated && matches!(new_transaction_state, TransactionState::Write) {
                         if let LimboResult::Busy = pager.begin_write_tx()? {
-                            log::trace!("begin_write_tx busy");
+                            tracing::trace!("begin_write_tx busy");
                             return Ok(StepResult::Busy);
                         }
                     }
@@ -1194,6 +1164,34 @@ impl Program {
                             .replace(new_transaction_state.clone());
                     }
                     state.pc += 1;
+                }
+                Insn::AutoCommit {
+                    auto_commit,
+                    rollback,
+                } => {
+                    let conn = self.connection.upgrade().unwrap();
+                    if *auto_commit != *conn.auto_commit.borrow() {
+                        if *rollback {
+                            todo!("Rollback is not implemented");
+                        } else {
+                            conn.auto_commit.replace(*auto_commit);
+                        }
+                    } else {
+                        if !*auto_commit {
+                            return Err(LimboError::TxError(
+                                "cannot start a transaction within a transaction".to_string(),
+                            ));
+                        } else if *rollback {
+                            return Err(LimboError::TxError(
+                                "cannot rollback - no transaction is active".to_string(),
+                            ));
+                        } else {
+                            return Err(LimboError::TxError(
+                                "cannot commit - no transaction is active".to_string(),
+                            ));
+                        }
+                    }
+                    return self.halt(pager);
                 }
                 Insn::Goto { target_pc } => {
                     assert!(target_pc.is_offset());
@@ -1402,9 +1400,33 @@ impl Program {
                     let record_from_regs: Record =
                         make_owned_record(&state.registers, start_reg, num_regs);
                     if let Some(ref idx_record) = *cursor.record()? {
-                        // omit the rowid from the idx_record, which is the last value
-                        if idx_record.get_values()[..idx_record.len() - 1]
+                        // Compare against the same number of values
+                        if idx_record.get_values()[..record_from_regs.len()]
                             >= record_from_regs.get_values()[..]
+                        {
+                            state.pc = target_pc.to_offset_int();
+                        } else {
+                            state.pc += 1;
+                        }
+                    } else {
+                        state.pc = target_pc.to_offset_int();
+                    };
+                }
+                Insn::IdxLE {
+                    cursor_id,
+                    start_reg,
+                    num_regs,
+                    target_pc,
+                } => {
+                    assert!(target_pc.is_offset());
+                    let mut cursors = state.cursors.borrow_mut();
+                    let cursor = get_cursor_as_index_mut(&mut cursors, *cursor_id);
+                    let record_from_regs: Record =
+                        make_owned_record(&state.registers, start_reg, num_regs);
+                    if let Some(ref idx_record) = *cursor.record()? {
+                        // Compare against the same number of values
+                        if idx_record.get_values()[..record_from_regs.len()]
+                            <= record_from_regs.get_values()[..]
                         {
                             state.pc = target_pc.to_offset_int();
                         } else {
@@ -1426,9 +1448,33 @@ impl Program {
                     let record_from_regs: Record =
                         make_owned_record(&state.registers, start_reg, num_regs);
                     if let Some(ref idx_record) = *cursor.record()? {
-                        // omit the rowid from the idx_record, which is the last value
-                        if idx_record.get_values()[..idx_record.len() - 1]
+                        // Compare against the same number of values
+                        if idx_record.get_values()[..record_from_regs.len()]
                             > record_from_regs.get_values()[..]
+                        {
+                            state.pc = target_pc.to_offset_int();
+                        } else {
+                            state.pc += 1;
+                        }
+                    } else {
+                        state.pc = target_pc.to_offset_int();
+                    };
+                }
+                Insn::IdxLT {
+                    cursor_id,
+                    start_reg,
+                    num_regs,
+                    target_pc,
+                } => {
+                    assert!(target_pc.is_offset());
+                    let mut cursors = state.cursors.borrow_mut();
+                    let cursor = get_cursor_as_index_mut(&mut cursors, *cursor_id);
+                    let record_from_regs: Record =
+                        make_owned_record(&state.registers, start_reg, num_regs);
+                    if let Some(ref idx_record) = *cursor.record()? {
+                        // Compare against the same number of values
+                        if idx_record.get_values()[..record_from_regs.len()]
+                            < record_from_regs.get_values()[..]
                         {
                             state.pc = target_pc.to_offset_int();
                         } else {
@@ -2205,7 +2251,11 @@ impl Program {
                             ScalarFunc::Substr | ScalarFunc::Substring => {
                                 let str_value = &state.registers[*start_reg];
                                 let start_value = &state.registers[*start_reg + 1];
-                                let length_value = &state.registers[*start_reg + 2];
+                                let length_value = if func.arg_count == 3 {
+                                    Some(&state.registers[*start_reg + 2])
+                                } else {
+                                    None
+                                };
                                 let result = exec_substring(str_value, start_value, length_value);
                                 state.registers[*dest] = result;
                             }
@@ -2745,6 +2795,41 @@ impl Program {
             }
         }
     }
+
+    fn halt(&self, pager: Rc<Pager>) -> Result<StepResult> {
+        let connection = self
+            .connection
+            .upgrade()
+            .expect("only weak ref to connection?");
+        let auto_commit = *connection.auto_commit.borrow();
+        tracing::trace!("Halt auto_commit {}", auto_commit);
+        return if auto_commit {
+            let current_state = connection.transaction_state.borrow().clone();
+            if current_state == TransactionState::Read {
+                pager.end_read_tx()?;
+                return Ok(StepResult::Done);
+            }
+            match pager.end_tx() {
+                Ok(crate::storage::wal::CheckpointStatus::IO) => Ok(StepResult::IO),
+                Ok(crate::storage::wal::CheckpointStatus::Done(_)) => {
+                    if self.change_cnt_on {
+                        if let Some(conn) = self.connection.upgrade() {
+                            conn.set_changes(self.n_change.get());
+                        }
+                    }
+                    Ok(StepResult::Done)
+                }
+                Err(e) => Err(e),
+            }
+        } else {
+            if self.change_cnt_on {
+                if let Some(conn) = self.connection.upgrade() {
+                    conn.set_changes(self.n_change.get());
+                }
+            }
+            return Ok(StepResult::Done);
+        };
+    }
 }
 
 fn get_new_rowid<R: Rng>(cursor: &mut BTreeCursor, mut rng: R) -> Result<CursorResult<i64>> {
@@ -2789,10 +2874,10 @@ fn make_owned_record(registers: &[OwnedValue], start_reg: &usize, count: &usize)
 }
 
 fn trace_insn(program: &Program, addr: InsnReference, insn: &Insn) {
-    if !log::log_enabled!(log::Level::Trace) {
+    if !tracing::enabled!(tracing::Level::TRACE) {
         return;
     }
-    log::trace!(
+    tracing::trace!(
         "{}",
         explain::insn_to_str(
             program,
@@ -3206,39 +3291,31 @@ fn exec_nullif(first_value: &OwnedValue, second_value: &OwnedValue) -> OwnedValu
 fn exec_substring(
     str_value: &OwnedValue,
     start_value: &OwnedValue,
-    length_value: &OwnedValue,
+    length_value: Option<&OwnedValue>,
 ) -> OwnedValue {
-    if let (OwnedValue::Text(str), OwnedValue::Integer(start), OwnedValue::Integer(length)) =
-        (str_value, start_value, length_value)
-    {
-        let start = *start as usize;
-        let str_len = str.as_str().len();
+    if let (OwnedValue::Text(str), OwnedValue::Integer(start)) = (str_value, start_value) {
+        let str_len = str.as_str().len() as i64;
 
-        if start > str_len {
-            return OwnedValue::build_text("");
-        }
-
-        let start_idx = start - 1;
-        let end = if *length != -1 {
-            start_idx + *length as usize
+        // The left-most character of X is number 1.
+        // If Y is negative then the first character of the substring is found by counting from the right rather than the left.
+        let first_position = if *start < 0 {
+            str_len.saturating_sub((*start).abs())
         } else {
-            str_len
+            *start - 1
         };
-        let substring = &str.as_str()[start_idx..end.min(str_len)];
-
-        OwnedValue::build_text(substring)
-    } else if let (OwnedValue::Text(str), OwnedValue::Integer(start)) = (str_value, start_value) {
-        let start = *start as usize;
-        let str_len = str.as_str().len();
-
-        if start > str_len {
-            return OwnedValue::build_text("");
-        }
-
-        let start_idx = start - 1;
-        let substring = &str.as_str()[start_idx..str_len];
-
-        OwnedValue::build_text(substring)
+        // If Z is negative then the abs(Z) characters preceding the Y-th character are returned.
+        let last_position = match length_value {
+            Some(OwnedValue::Integer(length)) => first_position + *length,
+            _ => str_len,
+        };
+        let (start, end) = if first_position <= last_position {
+            (first_position, last_position)
+        } else {
+            (last_position, first_position)
+        };
+        OwnedValue::build_text(
+            &str.as_str()[start.clamp(-0, str_len) as usize..end.clamp(0, str_len) as usize],
+        )
     } else {
         OwnedValue::Null
     }
@@ -3544,47 +3621,6 @@ fn exec_replace(source: &OwnedValue, pattern: &OwnedValue, replacement: &OwnedVa
     }
 }
 
-enum Affinity {
-    Integer,
-    Text,
-    Blob,
-    Real,
-    Numeric,
-}
-
-/// For tables not declared as STRICT, the affinity of a column is determined by the declared type of the column, according to the following rules in the order shown:
-/// If the declared type contains the string "INT" then it is assigned INTEGER affinity.
-/// If the declared type of the column contains any of the strings "CHAR", "CLOB", or "TEXT" then that column has TEXT affinity. Notice that the type VARCHAR contains the string "CHAR" and is thus assigned TEXT affinity.
-/// If the declared type for a column contains the string "BLOB" or if no type is specified then the column has affinity BLOB.
-/// If the declared type for a column contains any of the strings "REAL", "FLOA", or "DOUB" then the column has REAL affinity.
-/// Otherwise, the affinity is NUMERIC.
-/// Note that the order of the rules for determining column affinity is important. A column whose declared type is "CHARINT" will match both rules 1 and 2 but the first rule takes precedence and so the column affinity will be INTEGER.
-fn affinity(datatype: &str) -> Affinity {
-    // Note: callers of this function must ensure that the datatype is uppercase.
-    // Rule 1: INT -> INTEGER affinity
-    if datatype.contains("INT") {
-        return Affinity::Integer;
-    }
-
-    // Rule 2: CHAR/CLOB/TEXT -> TEXT affinity
-    if datatype.contains("CHAR") || datatype.contains("CLOB") || datatype.contains("TEXT") {
-        return Affinity::Text;
-    }
-
-    // Rule 3: BLOB or empty -> BLOB affinity (historically called NONE)
-    if datatype.contains("BLOB") || datatype.is_empty() {
-        return Affinity::Blob;
-    }
-
-    // Rule 4: REAL/FLOA/DOUB -> REAL affinity
-    if datatype.contains("REAL") || datatype.contains("FLOA") || datatype.contains("DOUB") {
-        return Affinity::Real;
-    }
-
-    // Rule 5: Otherwise -> NUMERIC affinity
-    Affinity::Numeric
-}
-
 /// When casting a TEXT value to INTEGER, the longest possible prefix of the value that can be interpreted as an integer number
 /// is extracted from the TEXT value and the remainder ignored. Any leading spaces in the TEXT value when converting from TEXT to INTEGER are ignored.
 /// If there is no prefix that can be interpreted as an integer number, the result of the conversion is 0.
@@ -3595,14 +3631,17 @@ fn affinity(datatype: &str) -> Affinity {
 /// The CAST operator understands decimal integers only — conversion of hexadecimal integers stops at the "x" in the "0x" prefix of the hexadecimal integer string and thus result of the CAST is always zero.
 fn cast_text_to_integer(text: &str) -> OwnedValue {
     let text = text.trim();
+    if text.is_empty() {
+        return OwnedValue::Integer(0);
+    }
     if let Ok(i) = text.parse::<i64>() {
         return OwnedValue::Integer(i);
     }
     // Try to find longest valid prefix that parses as an integer
     // TODO: inefficient
-    let mut end_index = text.len() - 1;
-    while end_index > 0 {
-        if let Ok(i) = text[..=end_index].parse::<i64>() {
+    let mut end_index = text.len().saturating_sub(1) as isize;
+    while end_index >= 0 {
+        if let Ok(i) = text[..=end_index as usize].parse::<i64>() {
             return OwnedValue::Integer(i);
         }
         end_index -= 1;
@@ -3616,14 +3655,17 @@ fn cast_text_to_integer(text: &str) -> OwnedValue {
 /// If there is no prefix that can be interpreted as a real number, the result of the conversion is 0.0.
 fn cast_text_to_real(text: &str) -> OwnedValue {
     let trimmed = text.trim_start();
+    if trimmed.is_empty() {
+        return OwnedValue::Float(0.0);
+    }
     if let Ok(num) = trimmed.parse::<f64>() {
         return OwnedValue::Float(num);
     }
     // Try to find longest valid prefix that parses as a float
     // TODO: inefficient
-    let mut end_index = trimmed.len() - 1;
-    while end_index > 0 {
-        if let Ok(num) = trimmed[..=end_index].parse::<f64>() {
+    let mut end_index = trimmed.len().saturating_sub(1) as isize;
+    while end_index >= 0 {
+        if let Ok(num) = trimmed[..=end_index as usize].parse::<f64>() {
             return OwnedValue::Float(num);
         }
         end_index -= 1;
@@ -4313,7 +4355,7 @@ mod tests {
         let length_value = OwnedValue::Integer(3);
         let expected_val = OwnedValue::build_text("lim");
         assert_eq!(
-            exec_substring(&str_value, &start_value, &length_value),
+            exec_substring(&str_value, &start_value, Some(&length_value)),
             expected_val
         );
 
@@ -4322,7 +4364,7 @@ mod tests {
         let length_value = OwnedValue::Integer(10);
         let expected_val = OwnedValue::build_text("limbo");
         assert_eq!(
-            exec_substring(&str_value, &start_value, &length_value),
+            exec_substring(&str_value, &start_value, Some(&length_value)),
             expected_val
         );
 
@@ -4331,7 +4373,7 @@ mod tests {
         let length_value = OwnedValue::Integer(3);
         let expected_val = OwnedValue::build_text("");
         assert_eq!(
-            exec_substring(&str_value, &start_value, &length_value),
+            exec_substring(&str_value, &start_value, Some(&length_value)),
             expected_val
         );
 
@@ -4340,7 +4382,7 @@ mod tests {
         let length_value = OwnedValue::Null;
         let expected_val = OwnedValue::build_text("mbo");
         assert_eq!(
-            exec_substring(&str_value, &start_value, &length_value),
+            exec_substring(&str_value, &start_value, Some(&length_value)),
             expected_val
         );
 
@@ -4349,7 +4391,7 @@ mod tests {
         let length_value = OwnedValue::Null;
         let expected_val = OwnedValue::build_text("");
         assert_eq!(
-            exec_substring(&str_value, &start_value, &length_value),
+            exec_substring(&str_value, &start_value, Some(&length_value)),
             expected_val
         );
     }

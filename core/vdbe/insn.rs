@@ -320,6 +320,12 @@ pub enum Insn {
         write: bool,
     },
 
+    // Set database auto-commit mode and potentially rollback.
+    AutoCommit {
+        auto_commit: bool,
+        rollback: bool,
+    },
+
     // Branch to the given PC.
     Goto {
         target_pc: BranchOffset,
@@ -419,6 +425,24 @@ pub enum Insn {
     // The P4 register values beginning with P3 form an unpacked index key that omits the PRIMARY KEY. Compare this key value against the index that P1 is currently pointing to, ignoring the PRIMARY KEY or ROWID fields at the end.
     // If the P1 index entry is greater than the key value then jump to P2. Otherwise fall through to the next instruction.
     IdxGT {
+        cursor_id: CursorID,
+        start_reg: usize,
+        num_regs: usize,
+        target_pc: BranchOffset,
+    },
+
+    // The P4 register values beginning with P3 form an unpacked index key that omits the PRIMARY KEY. Compare this key value against the index that P1 is currently pointing to, ignoring the PRIMARY KEY or ROWID fields at the end.
+    // If the P1 index entry is lesser or equal than the key value then jump to P2. Otherwise fall through to the next instruction.
+    IdxLE {
+        cursor_id: CursorID,
+        start_reg: usize,
+        num_regs: usize,
+        target_pc: BranchOffset,
+    },
+
+    // The P4 register values beginning with P3 form an unpacked index key that omits the PRIMARY KEY. Compare this key value against the index that P1 is currently pointing to, ignoring the PRIMARY KEY or ROWID fields at the end.
+    // If the P1 index entry is lesser than the key value then jump to P2. Otherwise fall through to the next instruction.
+    IdxLT {
         cursor_id: CursorID,
         start_reg: usize,
         num_regs: usize,
@@ -873,17 +897,37 @@ pub fn exec_remainder(mut lhs: &OwnedValue, mut rhs: &OwnedValue) -> OwnedValue 
         | (_, OwnedValue::Null)
         | (_, OwnedValue::Integer(0))
         | (_, OwnedValue::Float(0.0)) => OwnedValue::Null,
-        (OwnedValue::Integer(lhs), OwnedValue::Integer(rhs)) => OwnedValue::Integer(lhs % rhs),
+        (OwnedValue::Integer(lhs), OwnedValue::Integer(rhs)) => {
+            if rhs == &0 {
+                OwnedValue::Null
+            } else {
+                OwnedValue::Integer(lhs % rhs)
+            }
+        }
         (OwnedValue::Float(lhs), OwnedValue::Float(rhs)) => {
-            OwnedValue::Float(((*lhs as i64) % (*rhs as i64)) as f64)
+            let rhs_int = *rhs as i64;
+            if rhs_int == 0 {
+                OwnedValue::Null
+            } else {
+                OwnedValue::Float(((*lhs as i64) % rhs_int) as f64)
+            }
         }
         (OwnedValue::Float(lhs), OwnedValue::Integer(rhs)) => {
-            OwnedValue::Float(((*lhs as i64) % rhs) as f64)
+            if rhs == &0 {
+                OwnedValue::Null
+            } else {
+                OwnedValue::Float(((*lhs as i64) % rhs) as f64)
+            }
         }
         (OwnedValue::Integer(lhs), OwnedValue::Float(rhs)) => {
-            OwnedValue::Float((lhs % *rhs as i64) as f64)
+            let rhs_int = *rhs as i64;
+            if rhs_int == 0 {
+                OwnedValue::Null
+            } else {
+                OwnedValue::Float((lhs % rhs_int) as f64)
+            }
         }
-        _ => todo!(),
+        other => todo!("remainder not implemented for: {:?} {:?}", lhs, other),
     }
 }
 

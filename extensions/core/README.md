@@ -29,7 +29,7 @@ limbo_ext = { path = "path/to/limbo/extensions/core", features = ["static"] } # 
 # mimalloc is required if you intend on linking dynamically. It is imported for you by the register_extension
 # macro, so no configuration is needed. But it must be added to your Cargo.toml
 [target.'cfg(not(target_family = "wasm"))'.dependencies]
-mimalloc = { version = "*", default-features = false }
+mimalloc = { version = "0.1", default-features = false }
 
 
 # NOTE: Crate must be of type `cdylib` if you wish to link dynamically

@@ -1,8 +1,8 @@
 use crate::{Completion, File, LimboError, OpenFlags, Result, IO};
-use log::{debug, trace};
 use std::cell::RefCell;
 use std::io::{Read, Seek, Write};
 use std::rc::Rc;
+use tracing::{debug, trace};
 
 pub struct WindowsIO {}
 
@@ -58,10 +58,7 @@ impl File for WindowsFile {
         let mut file = self.file.borrow_mut();
         file.seek(std::io::SeekFrom::Start(pos as u64))?;
         {
-            let r = match c {
-                Completion::Read(ref r) => r,
-                _ => unreachable!(),
-            };
+            let r = c.as_read();
             let mut buf = r.buf_mut();
             let buf = buf.as_mut_slice();
             file.read_exact(buf)?;

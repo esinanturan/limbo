@@ -759,6 +759,34 @@ pub fn insn_to_str(
                 0,
                 "".to_string(),
             ),
+            Insn::IdxLT {
+                cursor_id,
+                start_reg,
+                num_regs: _,
+                target_pc,
+            } => (
+                "IdxLT",
+                *cursor_id as i32,
+                target_pc.to_debug_int(),
+                *start_reg as i32,
+                OwnedValue::build_text(""),
+                0,
+                "".to_string(),
+            ),
+            Insn::IdxLE {
+                cursor_id,
+                start_reg,
+                num_regs: _,
+                target_pc,
+            } => (
+                "IdxLE",
+                *cursor_id as i32,
+                target_pc.to_debug_int(),
+                *start_reg as i32,
+                OwnedValue::build_text(""),
+                0,
+                "".to_string(),
+            ),
             Insn::DecrJumpZero { reg, target_pc } => (
                 "DecrJumpZero",
                 *reg as i32,
@@ -1237,6 +1265,18 @@ pub fn insn_to_str(
                 OwnedValue::build_text(""),
                 0,
                 "".to_string(),
+            ),
+            Insn::AutoCommit {
+                auto_commit,
+                rollback,
+            } => (
+                "AutoCommit",
+                *auto_commit as i32,
+                *rollback as i32,
+                0,
+                OwnedValue::build_text(""),
+                0,
+                format!("auto_commit={}, rollback={}", auto_commit, rollback),
             ),
         };
     format!(

@@ -1,13 +1,13 @@
 use super::{Buffer, Completion, File, OpenFlags, IO};
 use crate::Result;
 
-use log::debug;
 use std::{
     cell::{Cell, RefCell, UnsafeCell},
     collections::BTreeMap,
     rc::Rc,
     sync::Arc,
 };
+use tracing::debug;
 
 pub struct MemoryIO {
     pages: UnsafeCell<BTreeMap<usize, MemPage>>,
@@ -79,10 +79,7 @@ impl File for MemoryFile {
     }
 
     fn pread(&self, pos: usize, c: Completion) -> Result<()> {
-        let r = match &c {
-            Completion::Read(ref r) => r,
-            _ => unreachable!(),
-        };
+        let r = c.as_read();
         let buf_len = r.buf().len();
         if buf_len == 0 {
             c.complete(0);

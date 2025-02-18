@@ -1,12 +1,12 @@
-# Compatibility with SQLite
+# Limbo compatibility with SQLite
 
 This document describes the compatibility of Limbo with SQLite.
 
-## Table of contents:
+## Table of contents
 
-- [Compatibility with SQLite](#compatibility-with-sqlite)
-  - [Table of contents:](#table-of-contents)
-  - [Features](#features)
+  - [Overview](#overview)
+    - [Features](#features)
+    - [Limitations](#limitations)
   - [SQLite query language](#sqlite-query-language)
     - [Statements](#statements)
       - [PRAGMA](#pragma)
@@ -26,16 +26,24 @@ This document describes the compatibility of Limbo with SQLite.
     - [Vector](#vector)
     - [Time](#time)
 
-## Features
+## Overview
 
 Limbo aims to be fully compatible with SQLite, with opt-in features not supported by SQLite.
 
-The current status of Limbo is:
+### Features
 
-* ✅ SQLite file format is fully supported.
-* 🚧 SQLite query language [[status](#sqlite-query-language)]
-* 🚧 SQLite C API [[status](#sqlite-c-api)].
+* ✅ SQLite file format is fully supported
+* 🚧 SQLite query language [[status](#sqlite-query-language)] is partially supported
+* 🚧 SQLite C API [[status](#sqlite-c-api)] is partially supported
+
+### Limitations
+
 * ⛔️ Concurrent access from multiple processes is not supported.
+* ⛔️ Savepoints are not supported.
+* ⛔️ Triggers are not supported.
+* ⛔️ Indexes are not supported.
+* ⛔️ Views are not supported.
+* ⛔️ Vacuum is not supported.
 
 ## SQLite query language
 
@@ -46,8 +54,8 @@ The current status of Limbo is:
 | ALTER TABLE               | No      |                                                                                   |
 | ANALYZE                   | No      |                                                                                   |
 | ATTACH DATABASE           | No      |                                                                                   |
-| BEGIN TRANSACTION         | No      |                                                                                   |
-| COMMIT TRANSACTION        | No      |                                                                                   |
+| BEGIN TRANSACTION         | Partial | `BEGIN DEFERRED` is not supported, transaction names are not supported.           |
+| COMMIT TRANSACTION        | Partial | Transaction names are not supported.                                              |
 | CREATE INDEX              | No      |                                                                                   |
 | CREATE TABLE              | Partial |                                                                                   |
 | CREATE TRIGGER            | No      |                                                                                   |
@@ -59,7 +67,7 @@ The current status of Limbo is:
 | DROP TABLE                | No      |                                                                                   |
 | DROP TRIGGER              | No      |                                                                                   |
 | DROP VIEW                 | No      |                                                                                   |
-| END TRANSACTION           | No      |                                                                                   |
+| END TRANSACTION           | Partial | Alias for `COMMIT TRANSACTION`                                                    |
 | EXPLAIN                   | Yes     |                                                                                   |
 | INDEXED BY                | No      |                                                                                   |
 | INSERT                    | Partial |                                                                                   |
@@ -131,7 +139,7 @@ The current status of Limbo is:
 | PRAGMA journal_mode              | Yes        |                                              |
 | PRAGMA journal_size_limit        | No         |                                              |
 | PRAGMA legacy_alter_table        | No         |                                              |
-| PRAGMA legacy_file_format        | No         |                                              |
+| PRAGMA legacy_file_format        | Yes        |                                              |
 | PRAGMA locking_mode              | No         |                                              |
 | PRAGMA max_page_count            | No         |                                              |
 | PRAGMA mmap_size                 | No         |                                              |
@@ -412,7 +420,7 @@ Modifiers:
 | AggStep        | Yes    |         |
 | AggStep        | Yes    |         |
 | And            | Yes    |         |
-| AutoCommit     | No     |         |
+| AutoCommit     | Yes    |         |
 | BitAnd         | Yes    |         |
 | BitNot         | Yes    |         |
 | BitOr          | Yes    |         |
@@ -453,7 +461,8 @@ Modifiers:
 | IdxDelete      | No     |         |
 | IdxGE          | Yes    |         |
 | IdxInsert      | No     |         |
-| IdxLT          | No     |         |
+| IdxLE          | Yes    |         |
+| IdxLT          | Yes    |         |
 | IdxRowid       | No     |         |
 | If             | Yes    |         |
 | IfNeg          | No     |         |

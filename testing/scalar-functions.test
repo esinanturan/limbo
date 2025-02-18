@@ -535,6 +535,21 @@ do_execsql_test substr-2-args {
   SELECT substr('limbo', 3);
 } {mbo}
 
+do_execsql_test substr-cases {
+  SELECT substr('limbo', 0);
+  SELECT substr('limbo', 0, 3);
+  SELECT substr('limbo', -2);
+  SELECT substr('limbo', -2, 1);
+  SELECT substr('limbo', -10, 7);
+  SELECT substr('limbo', 10, -7);
+} {limbo
+li
+bo
+b
+li
+mbo
+}
+
 do_execsql_test substring-3-args {
   SELECT substring('limbo', 1, 3);
 } {lim}
@@ -724,6 +739,7 @@ do_execsql_test zeroblob-blob {
 } {1}
 
 # CAST tests - INTEGER affinity
+
 do_execsql_test cast-text-to-integer {
   SELECT CAST('123' AS INTEGER);
 } {123}
@@ -731,6 +747,10 @@ do_execsql_test cast-text-to-integer {
 do_execsql_test cast-text-with-spaces-to-integer {
   SELECT CAST('  123  ' AS INTEGER);
 } {123}
+
+do_execsql_test cast-text-with-trailing-junk-to-integer {
+  SELECT CAST('1abc' AS INTEGER);
+} {1}
 
 do_execsql_test cast-invalid-text-to-integer {
   SELECT CAST('abc' AS INTEGER);

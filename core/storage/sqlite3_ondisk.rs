@@ -48,12 +48,12 @@ use crate::storage::database::DatabaseStorage;
 use crate::storage::pager::Pager;
 use crate::types::{OwnedValue, Record, Text, TextSubtype};
 use crate::{File, Result};
-use log::trace;
 use parking_lot::RwLock;
 use std::cell::RefCell;
 use std::pin::Pin;
 use std::rc::Rc;
 use std::sync::Arc;
+use tracing::trace;
 
 use super::pager::PageRef;
 
@@ -322,7 +322,7 @@ pub fn begin_write_database_header(header: &DatabaseHeader, pager: &Pager) -> Re
     let write_complete = Box::new(move |bytes_written: i32| {
         let buf_len = buffer_to_copy_in_cb.borrow().len();
         if bytes_written < buf_len as i32 {
-            log::error!("wrote({bytes_written}) less than expected({buf_len})");
+            tracing::error!("wrote({bytes_written}) less than expected({buf_len})");
         }
         // finish_read_database_header(buf, header).unwrap();
     });
@@ -450,19 +450,19 @@ impl PageContent {
     }
 
     pub fn write_u8(&self, pos: usize, value: u8) {
-        log::debug!("write_u8(pos={}, value={})", pos, value);
+        tracing::debug!("write_u8(pos={}, value={})", pos, value);
         let buf = self.as_ptr();
         buf[self.offset + pos] = value;
     }
 
     pub fn write_u16(&self, pos: usize, value: u16) {
-        log::debug!("write_u16(pos={}, value={})", pos, value);
+        tracing::debug!("write_u16(pos={}, value={})", pos, value);
         let buf = self.as_ptr();
         buf[self.offset + pos..self.offset + pos + 2].copy_from_slice(&value.to_be_bytes());
     }
 
     pub fn write_u32(&self, pos: usize, value: u32) {
-        log::debug!("write_u32(pos={}, value={})", pos, value);
+        tracing::debug!("write_u32(pos={}, value={})", pos, value);
         let buf = self.as_ptr();
         buf[self.offset + pos..self.offset + pos + 4].copy_from_slice(&value.to_be_bytes());
     }
@@ -542,7 +542,7 @@ impl PageContent {
         payload_overflow_threshold_min: usize,
         usable_size: usize,
     ) -> Result<BTreeCell> {
-        log::debug!("cell_get(idx={})", idx);
+        tracing::debug!("cell_get(idx={})", idx);
         let buf = self.as_ptr();
 
         let ncells = self.cell_count();
@@ -729,7 +729,7 @@ pub fn begin_write_btree_page(
 
             page_finish.clear_dirty();
             if bytes_written < buf_len as i32 {
-                log::error!("wrote({bytes_written}) less than expected({buf_len})");
+                tracing::error!("wrote({bytes_written}) less than expected({buf_len})");
             }
         })
     };
@@ -995,8 +995,11 @@ pub fn read_value(buf: &[u8], serial_type: &SerialType) -> Result<(OwnedValue, u
             if buf.len() < 3 {
                 crate::bail_corrupt_error!("Invalid BEInt24 value");
             }
+            let sign_extension = if buf[0] <= 127 { 0 } else { 255 };
             Ok((
-                OwnedValue::Integer(i32::from_be_bytes([0, buf[0], buf[1], buf[2]]) as i64),
+                OwnedValue::Integer(
+                    i32::from_be_bytes([sign_extension, buf[0], buf[1], buf[2]]) as i64
+                ),
                 3,
             ))
         }
@@ -1013,9 +1016,17 @@ pub fn read_value(buf: &[u8], serial_type: &SerialType) -> Result<(OwnedValue, u
             if buf.len() < 6 {
                 crate::bail_corrupt_error!("Invalid BEInt48 value");
             }
+            let sign_extension = if buf[0] <= 127 { 0 } else { 255 };
             Ok((
                 OwnedValue::Integer(i64::from_be_bytes([
-                    0, 0, buf[0], buf[1], buf[2], buf[3], buf[4], buf[5],
+                    sign_extension,
+                    sign_extension,
+                    buf[0],
+                    buf[1],
+                    buf[2],
+                    buf[3],
+                    buf[4],
+                    buf[5],
                 ])),
                 6,
             ))
@@ -1256,7 +1267,7 @@ pub fn begin_write_wal_frame(
 
             page_finish.clear_dirty();
             if bytes_written < buf_len as i32 {
-                log::error!("wrote({bytes_written}) less than expected({buf_len})");
+                tracing::error!("wrote({bytes_written}) less than expected({buf_len})");
             }
         })
     };
@@ -1287,7 +1298,7 @@ pub fn begin_write_wal_header(io: &Rc<dyn File>, header: &WalHeader) -> Result<(
     let write_complete = {
         Box::new(move |bytes_written: i32| {
             if bytes_written < WAL_HEADER_SIZE as i32 {
-                log::error!(
+                tracing::error!(
                     "wal header wrote({bytes_written}) less than expected({WAL_HEADER_SIZE})"
                 );
             }
@@ -1419,6 +1430,18 @@ mod tests {
     #[case(&[], SerialType::ConstInt1, OwnedValue::Integer(1))]
     #[case(&[1, 2, 3], SerialType::Blob(3), OwnedValue::Blob(vec![1, 2, 3].into()))]
     #[case(&[65, 66, 67], SerialType::String(3), OwnedValue::build_text("ABC"))]
+    #[case(&[0x80], SerialType::Int8, OwnedValue::Integer(-128))]
+    #[case(&[0x80, 0], SerialType::BEInt16, OwnedValue::Integer(-32768))]
+    #[case(&[0x80, 0, 0], SerialType::BEInt24, OwnedValue::Integer(-8388608))]
+    #[case(&[0x80, 0, 0, 0], SerialType::BEInt32, OwnedValue::Integer(-2147483648))]
+    #[case(&[0x80, 0, 0, 0, 0, 0], SerialType::BEInt48, OwnedValue::Integer(-140737488355328))]
+    #[case(&[0x80, 0, 0, 0, 0, 0, 0, 0], SerialType::BEInt64, OwnedValue::Integer(-9223372036854775808))]
+    #[case(&[0x7f], SerialType::Int8, OwnedValue::Integer(127))]
+    #[case(&[0x7f, 0xff], SerialType::BEInt16, OwnedValue::Integer(32767))]
+    #[case(&[0x7f, 0xff, 0xff], SerialType::BEInt24, OwnedValue::Integer(8388607))]
+    #[case(&[0x7f, 0xff, 0xff, 0xff], SerialType::BEInt32, OwnedValue::Integer(2147483647))]
+    #[case(&[0x7f, 0xff, 0xff, 0xff, 0xff, 0xff], SerialType::BEInt48, OwnedValue::Integer(140737488355327))]
+    #[case(&[0x7f, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff], SerialType::BEInt64, OwnedValue::Integer(9223372036854775807))]
     fn test_read_value(
         #[case] buf: &[u8],
         #[case] serial_type: SerialType,

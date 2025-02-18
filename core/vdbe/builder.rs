@@ -399,8 +399,14 @@ impl ProgramBuilder {
                 Insn::IdxGE { target_pc, .. } => {
                     resolve(target_pc, "IdxGE");
                 }
+                Insn::IdxLE { target_pc, .. } => {
+                    resolve(target_pc, "IdxLE");
+                }
                 Insn::IdxGT { target_pc, .. } => {
                     resolve(target_pc, "IdxGT");
+                }
+                Insn::IdxLT { target_pc, .. } => {
+                    resolve(target_pc, "IdxLT");
                 }
                 Insn::IsNull { reg: _, target_pc } => {
                     resolve(target_pc, "IsNull");
@@ -448,7 +454,6 @@ impl ProgramBuilder {
             database_header,
             comments: self.comments,
             connection,
-            auto_commit: true,
             parameters: self.parameters,
             n_change: Cell::new(0),
             change_cnt_on,
